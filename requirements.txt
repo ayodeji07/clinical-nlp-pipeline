@@ -1,0 +1,38 @@
+# Clinical NLP Pipeline — Runtime dependencies
+# Install: pip install -r requirements.txt
+
+# ── Web framework ─────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+
+# ── Database ──────────────────────────────────────────────────────
+sqlalchemy>=2.0.0
+
+# ── Data processing ───────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.26.0
+pyarrow>=14.0.0          # for parquet support
+
+# ── NLP — NER ─────────────────────────────────────────────────────
+spacy>=3.8.0,<3.9.0
+# scispaCy model installed separately — see VSCODE_GUIDE.md
+
+# ── NLP — Classification ──────────────────────────────────────────
+transformers>=4.38.0
+torch>=2.1.0
+scikit-learn>=1.4.0
+sentence-transformers>=2.5.0
+
+# ── ICD-10 fuzzy matching ─────────────────────────────────────────
+rapidfuzz>=3.6.0
+
+# ── Dashboard ─────────────────────────────────────────────────────
+streamlit>=1.32.0
+plotly>=5.19.0
+networkx>=3.2.0
+pyvis>=0.3.2
+requests>=2.31.0
+
+# ── Utilities ─────────────────────────────────────────────────────
+python-dotenv>=1.0.0
