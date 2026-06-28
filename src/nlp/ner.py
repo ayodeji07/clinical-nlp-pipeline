@@ -90,19 +90,19 @@ class Entity:
 
 
 # ── Label mapping ─────────────────────────────────────────────────
-# Maps scispaCy's raw entity labels to our five clinical categories.
-# en_core_sci_lg emits only "ENTITY"; specialised models (bc5cdr, etc.)
-# emit DISEASE / CHEMICAL — both cases handled below.
-_LABEL_MAP: dict[str, str] = {
-    "DISEASE":   "DISEASE",
-    "CHEMICAL":  "MEDICATION",
-    "DRUG":      "MEDICATION",
-    "PROCEDURE": "PROCEDURE",
+# Fallback for raw labels that are unambiguous STRUCTURAL categories —
+# trusted directly if a model ever emits them, since en_core_sci_lg only
+# emits the generic "ENTITY" label and bc5cdr only emits DISEASE/CHEMICAL
+# in practice (both handled by dedicated logic in _normalise_label).
+# Deliberately excludes DISEASE, GENE, and SPECIES: those carry the same
+# false-positive risk that motivated gating DISEASE behind the ICD-10
+# chapter lookup rather than trusting a raw label outright (see
+# _normalise_label's docstring for the full rationale).
+_SAFE_STRUCTURAL_LABEL_MAP: dict[str, str] = {
     "ANATOMY":   "ANATOMY",
     "ORGAN":     "ANATOMY",
     "CELL":      "ANATOMY",
-    "GENE":      "DISEASE",
-    "SPECIES":   "DISEASE",
+    "PROCEDURE": "PROCEDURE",
 }
 
 # Standalone fragments that are only meaningful as part of a longer phrase.
@@ -171,6 +171,12 @@ _SKIP_TERMS: frozenset[str] = frozenset({
     # "diabetic neuropathy", "pitting edema", "H. pylori" with "H." split
     # off as a false sentence-end abbreviation)
     "allergic", "undescended", "diabetic", "pitting", "pylori",
+    # bare type-qualifier split off from "type 1/2 diabetes mellitus"
+    # etc. by NER span splitting — meaningless without the condition
+    # name it modifies, and dangerous left standalone: bc5cdr/embedding
+    # matching can map it to an unrelated condition ("type 2" ->
+    # "Obesity, class 2") rather than recognising it as a fragment
+    "type 1", "type 2", "type i", "type ii",
     # generic verbs / state words picked up as spurious entities —
     # found via gold-standard sample review (2026-06-26): these carry
     # no clinical meaning on their own ("the airway would improve",
@@ -215,6 +221,21 @@ _SKIP_TERMS: frozenset[str] = frozenset({
     "p.o", "p.o.",
     # role/department abbreviations, not clinical entities
     "pcp", "appointment", "emergency department",
+    # found via dashboard review (2026-06-27): ECG lead labels, lab/
+    # biomarker names, dosing/administration terms, and medical
+    # specialty names — none are symptoms or diseases on their own
+    "v1-v4", "v1", "v2", "v3", "v4", "v5", "v6",
+    "troponin", "loading dose",
+    "cardiology", "neurology", "oncology", "urology", "radiology",
+    "pathology", "dermatology", "psychiatry", "gastroenterology",
+    "endocrinology", "pulmonology", "nephrology", "rheumatology",
+    "neurosurgery",
+    # found via dashboard review (2026-06-28): narrative/relational
+    # phrases, clinical scales and vital-sign labels (not the finding
+    # itself), treatment categories, and location/unit references —
+    # none are symptoms or diseases on their own
+    "family", "arrival", "family informed", "gcs", "blood pressure",
+    "anticoagulation", "neurocritical care unit", "critical prognosis",
 })
 
 # Keywords that signal a procedure mention.
@@ -225,7 +246,7 @@ _PROCEDURE_KEYWORDS: frozenset[str] = frozenset({
     "incision", "dissection", "closure", "suture", "ligat",
     "anastomosis", "hemostasis", "electrocautery", "cauterization",
     "angioplasty", "stenting", "intubation", "ventilation",
-    "dialysis", "transfusion", "transplant", "repair",
+    "dialysis", "transfusion", "infusion", "transplant", "repair",
     "reconstruction", "amputation", "debridement", "drainage",
     "aspiration", "lavage", "catheterization", "catheterisation",
     "appendectomy", "cholecystectomy", "hysterectomy",
@@ -235,9 +256,14 @@ _PROCEDURE_KEYWORDS: frozenset[str] = frozenset({
     "sedation", "intubation",
     # devices placed during procedures
     "stent", "catheter", "drain", "cannula",
-    # imaging / diagnostics
-    "ct scan", "mri", "x-ray", "ultrasound", "echocardiogram",
+    # imaging / diagnostics — specific compound terms rather than a
+    # bare "ct " substring, which would collide with "infarct " (ends
+    # in "...ct ") and incorrectly flag it as a procedure
+    "ct scan", "ct head", "ct chest", "ct abdomen", "ct pelvis",
+    "ct brain", "ct angiogram", "mri", "x-ray", "ultrasound", "echocardiogram",
     "electrocardiogram", "ekg", "ecg", "eeg",
+    # neurosurgical procedures
+    "craniectomy", "craniotomy",
     # interventional cardiology / common abbreviations
     "pci", "cabg", "ptca", "ercp", "cath",
     "endoscopy", "colonoscopy", "bronchoscopy", "laparoscopy",
@@ -453,6 +479,7 @@ _SYMPTOM_FAST: frozenset[str] = frozenset({
     "bruising", "bruise", "bruised", "ecchymosis",
     "diplopia", "blurred vision", "tinnitus", "vertigo",
     "distention", "distension", "bloating",
+    "diaphoresis", "sweating",
 })
 
 # Pathology-indicating suffix words/morphemes. An anatomy keyword combined
@@ -639,7 +666,18 @@ def _normalise_label(raw_label: str, entity_text: str) -> str | None:
             return icd10_label
         return "DISEASE"  # bc5cdr confident; ICD-10 had no strong match
 
-    # 12. Default for ENTITY spans: SYMPTOM
+    # 12. Trust an unambiguous structural raw label directly, if the
+    #     model provided one (e.g. an alternate/future NER model emitting
+    #     ANATOMY / ORGAN / PROCEDURE / CELL directly, rather than the
+    #     generic ENTITY label en_core_sci_lg uses). Deliberately excludes
+    #     GENE / SPECIES / DISEASE from this fallback — those carry the
+    #     same false-positive risk that motivated restricting DISEASE to
+    #     the ICD-10-gated path above, so they must not bypass it here.
+    mapped = _SAFE_STRUCTURAL_LABEL_MAP.get(label_up)
+    if mapped:
+        return mapped
+
+    # 13. Default for ENTITY spans: SYMPTOM
     return "SYMPTOM"
 
 

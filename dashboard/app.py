@@ -24,10 +24,21 @@ Navigation
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Streamlit runs this script directly (`streamlit run dashboard/app.py`),
+# which puts this file's own directory (dashboard/) on sys.path -- not the
+# project root. That makes `dashboard` itself unimportable as a package
+# from within its own folder. Insert the project root (this file's parent)
+# so absolute imports like `from dashboard.api_client import ...` resolve,
+# same pattern the notebooks use (`sys.path.insert(0, '..')`).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 
 from dashboard.api_client import check_health
-from dashboard.pages import demo, explorer, model_metrics
+from dashboard.views import demo, explorer, model_metrics
 
 # ── Page config ───────────────────────────────────────────────────
 # Must be the first Streamlit call in the script.

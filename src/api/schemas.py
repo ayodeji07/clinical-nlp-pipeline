@@ -35,6 +35,16 @@ class HealthResponse(BaseModel):
     status:   str = "ok"
     version:  str
     database: str = Field(description="'connected' or 'unreachable'")
+    icd10_embedding_available: bool = Field(
+        default=True,
+        description=(
+            "False if semantic ICD-10 matching has failed to load and "
+            "is disabled for this process. Exact/fuzzy ICD-10 matching "
+            "is unaffected either way — this only flags the fallback "
+            "used for entity text that doesn't match any ICD-10 "
+            "description lexically."
+        ),
+    )
 
 
 # ════════════════════════════════════════════════════════════════

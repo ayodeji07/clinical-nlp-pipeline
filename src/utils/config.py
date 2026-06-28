@@ -20,11 +20,52 @@ Design notes
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()  # populate os.getenv() from .env before any class is defined
+
+
+@contextmanager
+def force_offline_hf_env():
+    """Temporarily force huggingface_hub/transformers into fully offline mode.
+
+    ``local_files_only=True`` on an individual ``from_pretrained()`` call
+    does not stop every internal network call some library versions
+    make (e.g. commit-history or discussion metadata lookups). Those
+    extra calls can hang indefinitely on a flaky network rather than
+    failing fast — even though the model is fully cached locally —
+    which previously caused multi-minute hangs on model load.
+
+    ``HF_HUB_OFFLINE`` / ``TRANSFORMERS_OFFLINE`` are huggingface_hub's
+    documented mechanism for guaranteeing zero network calls; they're
+    stronger than the per-call flag. Use this to wrap *only* the
+    local-cache load attempt, so a genuine fallback download (model not
+    yet cached) still works normally once the env is restored.
+
+    Example::
+
+        with force_offline_hf_env():
+            try:
+                return SentenceTransformer(name, local_files_only=True)
+            except Exception:
+                pass
+        return SentenceTransformer(name)  # real download, env restored
+    """
+    keys = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
+    previous = {k: os.environ.get(k) for k in keys}
+    for k in keys:
+        os.environ[k] = "1"
+    try:
+        yield
+    finally:
+        for k, v in previous.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 # ── Project root ─────────────────────────────────────────────────
@@ -120,8 +161,16 @@ class ClassifierConfig:
     readmission_labels: list[str] = ["not_readmitted", "readmitted"]
 
     @classmethod
-    def active_labels(cls) -> list[str]:
-        """Return the label set for the currently configured task.
+    def active_labels(cls, task: str | None = None) -> list[str]:
+        """Return the label set for the given (or globally configured) task.
+
+        Args:
+            task: Task name to look up. Defaults to ``cls.task`` (the
+                global default) when not provided, so existing callers
+                that rely on the env-configured default keep working.
+                Pass explicitly to respect a per-instance task override
+                (e.g. from ``ClinicalClassifier(task=...)``) rather than
+                silently falling back to the global default.
 
         Returns:
             List of string class labels for the active task.
@@ -129,16 +178,17 @@ class ClassifierConfig:
         Raises:
             ValueError: If `task` is not a recognised task name.
         """
+        task = task or cls.task
         label_map = {
             "severity":    cls.severity_labels,
             "readmission": cls.readmission_labels,
         }
-        if cls.task not in label_map:
+        if task not in label_map:
             raise ValueError(
-                f"Unknown classifier task '{cls.task}'. "
+                f"Unknown classifier task '{task}'. "
                 f"Choose from: {list(label_map.keys())}"
             )
-        return label_map[cls.task]
+        return label_map[task]
 
 
 class TrainingConfig:

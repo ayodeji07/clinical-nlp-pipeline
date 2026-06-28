@@ -95,6 +95,55 @@ def _content_words(text: str) -> set[str]:
     return {w for w in words if w not in _GENERIC_QUALIFIER_WORDS and len(w) > 1}
 
 
+def _is_unsafe_type_assertion(query: str, description: str) -> bool:
+    """True if `description` asserts "type 1"/"type 2" but `query` doesn't.
+
+    `_content_words()` deliberately strips single-character tokens, so
+    "1" and "2" are invisible to the generic-vs-specific preference
+    logic above — "diabetes mellitus", "type 1 diabetes mellitus", and
+    "type 2 diabetes mellitus" all reduce to the same content-word set.
+    That means a bare, type-less query is equally "close" to both Type 1
+    and Type 2 ICD-10 entries, and whichever one a fuzzy/embedding
+    matcher ranks first is essentially arbitrary — asserting the wrong
+    type is a different diagnosis, not just a less precise one, so this
+    blocks that specific failure mode rather than relying on string
+    closeness to pick correctly.
+    """
+    desc_lower = description.lower()
+    has_type1 = "type 1" in desc_lower or "type i " in desc_lower
+    has_type2 = "type 2" in desc_lower or "type ii" in desc_lower
+    if not (has_type1 or has_type2):
+        return False
+
+    query_lower = query.lower()
+    query_has_type1 = "type 1" in query_lower or "type i " in f"{query_lower} "
+    query_has_type2 = "type 2" in query_lower or "type ii" in query_lower
+
+    if has_type1 and query_has_type1:
+        return False
+    if has_type2 and query_has_type2:
+        return False
+    return True
+
+
+def _is_external_cause_code(icd10_code: str) -> bool:
+    """True if `icd10_code` is an ICD-10 "external causes" code (V00-Y99).
+
+    Chapter 20 codes describe HOW an injury happened (a fall, a
+    collision, an accident) and are only ever valid as a supplementary
+    code paired with an actual injury diagnosis — never a standalone
+    match for a SYMPTOM or DISEASE entity, which is all this mapper is
+    ever asked to map (see ``map_entities``). Fuzzy/embedding matching
+    can still rank one highly off an unrelated word that happens to
+    appear in its description (e.g. "stairs", from "worse with
+    stairs", matching "Fall on stairs" — fabricating a fall that was
+    never mentioned).
+    """
+    if not icd10_code:
+        return False
+    return icd10_code[0].upper() in "VWXY"
+
+
 # ── Output dataclass ──────────────────────────────────────────────
 
 @dataclass
@@ -164,9 +213,24 @@ class ICD10Mapper:
         self._descriptions_lower = self._df["description"].str.lower().tolist()
         self._embeddings  = None   # built lazily
         self._embed_model = None   # loaded lazily
+        # Set True only after a real load attempt fails (import error,
+        # or no local cache + no network). False until then — covers
+        # both "never attempted yet" and "loaded successfully".
+        self._embedding_unavailable = False
         logger.info(
             "ICD10Mapper ready: %d codes loaded", len(self._df)
         )
+
+    @property
+    def embedding_available(self) -> bool:
+        """Whether semantic (embedding-based) ICD-10 matching is usable.
+
+        ``True`` until a real load attempt fails. Exact and fuzzy
+        matching are unaffected either way — this only governs the
+        fallback used for entity text that doesn't match any ICD-10
+        description lexically.
+        """
+        return not self._embedding_unavailable
 
     # ── Data loading ──────────────────────────────────────────────
 
@@ -295,16 +359,27 @@ class ICD10Mapper:
 
         # Step 1: exact match — O(1), always try first
         exact = self._exact_match(normalised)
+        exact = [m for m in exact if not _is_external_cause_code(m.icd10_code)]
         if exact:
             return exact
 
         # Step 2: fuzzy match — ~10ms, good for spelling variants
         fuzzy = self._fuzzy_match(normalised)
+        fuzzy = [
+            m for m in fuzzy
+            if not _is_unsafe_type_assertion(normalised, m.description)
+            and not _is_external_cause_code(m.icd10_code)
+        ]
         if fuzzy:
             return fuzzy
 
         # Step 3: embedding match — ~100ms, for novel phrasing
         embedding = self._embedding_match(normalised)
+        embedding = [
+            m for m in embedding
+            if not _is_unsafe_type_assertion(normalised, m.description)
+            and not _is_external_cause_code(m.icd10_code)
+        ]
         return embedding
 
     def map_entities(
@@ -526,70 +601,91 @@ class ICD10Mapper:
         Returns:
             Top-k matches above the embedding threshold, or empty list.
         """
+        # Once a real attempt has failed, don't keep retrying a known-
+        # broken import/load on every single call — fail fast instead.
+        if self._embedding_unavailable:
+            return []
+
         try:
             import numpy as np
             from sentence_transformers import SentenceTransformer, util
+
+            # Load the embedding model once and cache it.
+            # Try the local cache first — sentence-transformers otherwise
+            # always does a handful of network round-trips (HEAD requests
+            # for adapter_config.json etc.) even when the model is fully
+            # cached, which crashes the whole pipeline on any transient
+            # network blip. Only fall back to a live download if nothing
+            # is cached yet.
+            if self._embed_model is None:
+                from src.utils.config import ModelConfig, force_offline_hf_env
+                model_name = ModelConfig.embedding_model
+                try:
+                    with force_offline_hf_env():
+                        self._embed_model = SentenceTransformer(
+                            model_name, local_files_only=True
+                        )
+                    logger.info(
+                        "Loaded embedding model from local cache (offline): %s",
+                        model_name,
+                    )
+                except Exception:
+                    logger.info(
+                        "Embedding model not found in local cache — "
+                        "downloading from Hugging Face Hub: %s (first call only)",
+                        model_name,
+                    )
+                    self._embed_model = SentenceTransformer(model_name)
+
+            # Build (or load from disk cache) the ICD-10 embedding index
+            if self._embeddings is None:
+                self._embeddings = self._load_or_build_embedding_index()
+
+            query_embedding = self._embed_model.encode(
+                text, convert_to_tensor=True
+            )
+            scores = util.cos_sim(query_embedding, self._embeddings)[0]
+            top_indices = scores.argsort(descending=True)[: self._top_k * 2]
+
+            matches = []
+            for idx in top_indices:
+                score = float(scores[idx])
+                if score < ICD10Config.embedding_threshold:
+                    break
+                row = self._df.iloc[int(idx)]
+                matches.append(ICD10Match(
+                    icd10_code   = row["icd10_code"],
+                    description  = row["description"],
+                    confidence   = score,
+                    match_method = "embedding",
+                    rank         = len(matches) + 1,
+                ))
+                if len(matches) >= self._top_k:
+                    break
+
+            return matches
+
         except ImportError:
+            self._embedding_unavailable = True
             logger.warning(
                 "sentence-transformers not installed — "
                 "embedding fallback disabled. "
                 "Run: pip install sentence-transformers"
             )
             return []
-
-        # Load the embedding model once and cache it.
-        # Try the local cache first — sentence-transformers otherwise
-        # always does a handful of network round-trips (HEAD requests
-        # for adapter_config.json etc.) even when the model is fully
-        # cached, which crashes the whole pipeline on any transient
-        # network blip. Only fall back to a live download if nothing
-        # is cached yet.
-        if self._embed_model is None:
-            from src.utils.config import ModelConfig
-            model_name = ModelConfig.embedding_model
-            try:
-                self._embed_model = SentenceTransformer(
-                    model_name, local_files_only=True
-                )
-                logger.info(
-                    "Loaded embedding model from local cache (offline): %s",
-                    model_name,
-                )
-            except Exception:
-                logger.info(
-                    "Embedding model not found in local cache — "
-                    "downloading from Hugging Face Hub: %s (first call only)",
-                    model_name,
-                )
-                self._embed_model = SentenceTransformer(model_name)
-
-        # Build (or load from disk cache) the ICD-10 embedding index
-        if self._embeddings is None:
-            self._embeddings = self._load_or_build_embedding_index()
-
-        query_embedding = self._embed_model.encode(
-            text, convert_to_tensor=True
-        )
-        scores = util.cos_sim(query_embedding, self._embeddings)[0]
-        top_indices = scores.argsort(descending=True)[: self._top_k * 2]
-
-        matches = []
-        for idx in top_indices:
-            score = float(scores[idx])
-            if score < ICD10Config.embedding_threshold:
-                break
-            row = self._df.iloc[int(idx)]
-            matches.append(ICD10Match(
-                icd10_code   = row["icd10_code"],
-                description  = row["description"],
-                confidence   = score,
-                match_method = "embedding",
-                rank         = len(matches) + 1,
-            ))
-            if len(matches) >= self._top_k:
-                break
-
-        return matches
+        except Exception as exc:
+            # Never let an embedding-fallback failure crash the whole
+            # /notes/analyse request — exact/fuzzy matching still works.
+            # Mark unavailable so we don't keep retrying a known-broken
+            # load (e.g. resource contention during import) on every call.
+            self._embedding_unavailable = True
+            logger.warning(
+                "Embedding fallback failed and is now disabled for this "
+                "process (%s: %s). Exact/fuzzy ICD-10 matching is "
+                "unaffected; restart the process to retry.",
+                type(exc).__name__, exc,
+            )
+            return []
 
     # ── Utility ───────────────────────────────────────────────────
 

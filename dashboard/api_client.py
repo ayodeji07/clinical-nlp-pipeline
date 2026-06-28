@@ -58,6 +58,14 @@ def _base_url() -> str:
 # Default timeout for all requests (seconds)
 _TIMEOUT = 30
 
+# /notes/analyse lazily loads the NER pipeline, ICD-10 mapper (incl. the
+# sentence-transformer embedding model), and severity classifier on its
+# first call in a freshly started backend process -- measured cold-start
+# cost is ~110-140s. _TIMEOUT (30s) is fine for every other endpoint but
+# would always time out the very first analyse request, which is the
+# one a user hits immediately after starting the backend.
+_ANALYSE_TIMEOUT = 180
+
 
 # ── Health ────────────────────────────────────────────────────────
 
@@ -103,12 +111,12 @@ def analyse_note(
                 "include_icd10":    include_icd10,
                 "include_severity": include_severity,
             },
-            timeout = _TIMEOUT,
+            timeout = _ANALYSE_TIMEOUT,
         )
         resp.raise_for_status()
         return resp.json()
     except requests.exceptions.Timeout:
-        logger.error("analyse_note timed out after %ds", _TIMEOUT)
+        logger.error("analyse_note timed out after %ds", _ANALYSE_TIMEOUT)
         return None
     except Exception as exc:
         logger.error("analyse_note failed: %s", exc)

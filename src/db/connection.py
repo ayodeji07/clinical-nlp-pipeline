@@ -48,7 +48,7 @@ from typing import Generator
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from src.utils.config import DatabaseConfig, settings
 from src.utils.logger import get_logger
@@ -68,11 +68,30 @@ def _build_engine(url: str) -> Engine:
     Returns:
         Configured :class:`sqlalchemy.engine.Engine` instance.
     """
-    is_sqlite = url.startswith("sqlite")
+    is_sqlite        = url.startswith("sqlite")
+    is_sqlite_memory = is_sqlite and ":memory:" in url
 
-    if is_sqlite:
+    if is_sqlite_memory:
+        # In-memory SQLite is connection-private: each new DBAPI
+        # connection gets its own fresh, empty database. NullPool opens
+        # a new connection on every checkout, so tables created via
+        # create_all_tables() on one connection would be invisible to
+        # the next (e.g. the connection handling an API request) --
+        # this caused "no such table" errors in the test suite.
+        # StaticPool keeps exactly one connection alive for the engine's
+        # lifetime so every checkout shares the same in-memory database.
+        engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        logger.debug("SQLite in-memory engine created: %s", url)
+
+    elif is_sqlite:
         # NullPool avoids the "database is locked" error that occurs
         # when SQLite is accessed from multiple threads (e.g. FastAPI).
+        # Safe for a file-based DB since the file on disk persists
+        # state across connections (unlike :memory:, see above).
         engine = create_engine(
             url,
             connect_args={"check_same_thread": False},

@@ -20,6 +20,7 @@ import pytest
 from src.nlp.ner import (
     BaseNERPipeline,
     Entity,
+    HybridNERPipeline,
     SpacyNERPipeline,
     _normalise_label,
     build_ner_pipeline,
@@ -82,8 +83,13 @@ class TestNormaliseLabel:
         assert _normalise_label("XYZ",     "nausea")  == "SYMPTOM"
 
     def test_case_insensitive_raw_label(self):
-        assert _normalise_label("disease",  "pain")    == "DISEASE"
-        assert _normalise_label("Chemical", "aspirin") == "MEDICATION"
+        # "pain" is deliberately excluded here -- it's in the SYMPTOM
+        # fast-path regardless of raw label (bc5cdr over-tags things like
+        # "knee pain"/"cough" as DISEASE; gold-standard review confirmed
+        # the fast-path must win). Use a term with no fast-path/keyword
+        # collision so this only tests raw-label case-insensitivity.
+        assert _normalise_label("disease",  "hypertension") == "DISEASE"
+        assert _normalise_label("Chemical", "aspirin")      == "MEDICATION"
 
     def test_procedure_before_anatomy(self):
         # "heart surgery" — surgery keyword wins over heart (anatomy)
@@ -177,9 +183,15 @@ class TestBuildNERPipeline:
                           BaseNERPipeline)
 
     def test_uses_config_default(self):
+        # Default is "hybrid" (HybridNERPipeline has no single _model_name --
+        # it wraps two SpacyNERPipeline instances under _fine/_broad).
         from src.utils.config import ModelConfig
         pipeline = build_ner_pipeline()
-        assert pipeline._model_name == ModelConfig.ner_model
+        if ModelConfig.ner_model == "hybrid":
+            assert isinstance(pipeline, HybridNERPipeline)
+            assert pipeline.model_name.startswith("hybrid(")
+        else:
+            assert pipeline._model_name == ModelConfig.ner_model
 
     def test_custom_model_name(self):
         pipeline = build_ner_pipeline(model_name="en_ner_bc5cdr_md")

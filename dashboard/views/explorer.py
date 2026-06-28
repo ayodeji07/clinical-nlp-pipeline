@@ -1,5 +1,5 @@
 """
-dashboard/pages/explorer.py
+dashboard/views/explorer.py
 ────────────────────────────────────────────────────────────────
 Entity Explorer page — frequency charts and co-occurrence network.
 

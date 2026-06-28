@@ -1,5 +1,5 @@
 """
-dashboard/pages/model_metrics.py
+dashboard/views/model_metrics.py
 ────────────────────────────────────────────────────────────────
 Model Metrics page — classifier performance visualisation.
 

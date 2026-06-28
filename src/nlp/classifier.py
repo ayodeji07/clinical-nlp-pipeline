@@ -41,6 +41,7 @@ from src.utils.config import (
     ClassifierConfig,
     ModelConfig,
     TrainingConfig,
+    force_offline_hf_env,
     settings,
 )
 from src.utils.logger import get_logger
@@ -66,9 +67,10 @@ def _from_pretrained_offline_first(loader_cls, model_name_or_path, **kwargs):
         **kwargs: Forwarded to ``from_pretrained``.
     """
     try:
-        return loader_cls.from_pretrained(
-            model_name_or_path, local_files_only=True, **kwargs
-        )
+        with force_offline_hf_env():
+            return loader_cls.from_pretrained(
+                model_name_or_path, local_files_only=True, **kwargs
+            )
     except Exception:
         logger.info(
             "%s not found in local cache — downloading: %s",
@@ -209,7 +211,7 @@ class ClinicalClassifier:
         self._task       = task
         self._model_name = model_name
         self._output_dir = output_dir or ModelConfig.fine_tuned_dir
-        self._labels     = ClassifierConfig.active_labels()
+        self._labels     = ClassifierConfig.active_labels(self._task)
         self._label2id   = {lbl: i for i, lbl in enumerate(self._labels)}
         self._id2label   = {i: lbl for i, lbl in enumerate(self._labels)}
         self._model      = None

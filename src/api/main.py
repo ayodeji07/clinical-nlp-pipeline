@@ -66,6 +66,21 @@ async def lifespan(app: FastAPI):
     # Attach db_status to app.state so the health endpoint can read it
     app.state.db_status = db_status
     logger.info("Database: %s", db_status)
+
+    # Eagerly load the NER pipeline, ICD-10 mapper, and classifier now,
+    # rather than lazily on whichever request happens to be first.
+    # Most deployment platforms hold off routing traffic until the
+    # health check passes, so this cost is absorbed into startup time
+    # rather than a real user's request.
+    try:
+        notes.warm_up()
+    except Exception:
+        # Non-fatal: whatever didn't warm up here will load lazily on
+        # whichever request needs it. exc_info=True so a resource-
+        # contention failure (e.g. an import failing under low memory)
+        # is actually diagnosable instead of logging an empty message.
+        logger.error("Model warm-up failed — falling back to lazy loading", exc_info=True)
+
     logger.info("API ready at http://%s:%s", APIConfig.host, APIConfig.port)
 
     yield   # application is running
@@ -119,13 +134,15 @@ def health() -> HealthResponse:
     dashboard to confirm the API is running before making requests.
 
     Returns:
-        :class:`HealthResponse` with status, version, and DB state.
+        :class:`HealthResponse` with status, version, DB state, and
+        whether semantic ICD-10 matching is available or degraded.
     """
     db_status = getattr(app.state, "db_status", "unknown")
     return HealthResponse(
         status   = "ok",
         version  = APIConfig.version,
         database = db_status,
+        icd10_embedding_available = notes.icd10_embedding_available(),
     )
 
 

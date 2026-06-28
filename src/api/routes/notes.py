@@ -36,7 +36,8 @@ from src.api.schemas import (
 from src.db.connection import get_db_session
 from src.db.repository import EntityRepository, ICD10Repository, NoteRepository
 from src.utils.logger import get_logger
-from src.utils.text_utils import prepare_for_inference, word_count
+from src.etl.transform import prepare_for_inference
+from src.utils.text_utils import word_count
 
 logger    = get_logger(__name__)
 router    = APIRouter(prefix="/notes", tags=["Notes"])
@@ -73,6 +74,21 @@ def _get_mapper():
     return _icd_mapper
 
 
+def icd10_embedding_available() -> bool:
+    """Whether semantic (embedding-based) ICD-10 matching is usable.
+
+    Used by the ``/health`` endpoint to surface degraded-mode state
+    rather than leaving it silently indistinguishable from "no match
+    found". ``True`` if the mapper hasn't loaded yet (not yet known to
+    be broken) or has loaded successfully; ``False`` only after a real
+    load attempt has failed.
+    """
+    mapper = _icd_mapper  # don't trigger a load just to check status
+    if mapper is None:
+        return True
+    return mapper.embedding_available
+
+
 def _get_classifier():
     """Return the module-level classifier, loading it if needed."""
     global _classifier
@@ -88,6 +104,44 @@ def _get_classifier():
                 "severity prediction will be skipped.", exc
             )
     return _classifier
+
+
+def warm_up() -> None:
+    """Eagerly load the NER pipeline, ICD-10 mapper, and classifier.
+
+    Call this during application startup (see ``src/api/main.py``'s
+    lifespan) rather than letting them load lazily on first request.
+    Combined model-loading cost is ~110-140s — deferring it means
+    whichever user sends the first request eats that entire delay, and
+    most HTTP clients (including the dashboard) have a much shorter
+    timeout and will report a false "API did not respond" error well
+    before loading actually finishes. Paying this cost once at startup
+    means no real request is ever the slow one.
+    """
+    logger.info("Warming up NLP pipeline (NER, ICD-10 mapper, classifier)...")
+    t_start = time.perf_counter()
+
+    # Constructing these wrapper objects is cheap -- the actual heavy
+    # loading (spaCy's .load(), the sentence-transformer embedding model
+    # + 74k-description index) only happens lazily on first real use.
+    # Force that now with a real dummy call, rather than just
+    # constructing the wrappers and leaving the expensive part for
+    # whichever request happens to be first.
+    ner = _get_ner()
+    if ner:
+        ner.extract("Patient has hypertension.")
+
+    mapper = _get_mapper()
+    if mapper:
+        # Deliberately obscure text guaranteed not to exact- or
+        # fuzzy-match any ICD-10 description, forcing the embedding
+        # fallback (and therefore the embedding model + index load)
+        # to actually run now instead of on the first real request.
+        mapper.map("zzqxv nonexistent fictional placeholder condition")
+
+    _get_classifier()
+
+    logger.info("Warm-up complete in %.1fs", time.perf_counter() - t_start)
 
 
 # ── Analyse ───────────────────────────────────────────────────────

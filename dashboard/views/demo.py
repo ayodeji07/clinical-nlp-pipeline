@@ -1,5 +1,5 @@
 """
-dashboard/pages/demo.py
+dashboard/views/demo.py
 ────────────────────────────────────────────────────────────────
 Live demo page — paste clinical text and get entities,
 ICD-10 mappings, and severity classification in real time.
