@@ -58,8 +58,10 @@ COPY src/        ./src/
 COPY dashboard/  ./dashboard/
 COPY data/raw/   ./data/raw/
 
-# Non-root user for security
-RUN useradd --create-home appuser
+# Create writable dirs and non-root user before switching
+RUN useradd --create-home appuser && \
+    mkdir -p /app/data/processed /app/data/models && \
+    chown -R appuser:appuser /app/data
 USER appuser
 
 # The API port — Railway/Render assign this via $PORT at runtime
