@@ -26,6 +26,12 @@ data/models/
 !data/processed/.gitkeep
 !data/models/.gitkeep
 
+# icd10_codes.csv is a public ICD-10 code/description reference
+# table, not patient data, and is a hard runtime dependency for
+# ICD10Mapper/HybridNERPipeline when data/processed/ isn't shipped
+# (e.g. in the Docker image) — tracked despite the *.csv rule above.
+!data/raw/icd10_codes.csv
+
 # Database
 *.db
 *.sqlite

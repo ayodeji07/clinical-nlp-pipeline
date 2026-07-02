@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+*.md
+notebooks/
+data/processed/
+data/models/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/

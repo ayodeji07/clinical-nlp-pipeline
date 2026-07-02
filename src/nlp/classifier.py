@@ -236,23 +236,43 @@ class ClinicalClassifier:
         return self._tokenizer
 
     def load(self) -> None:
-        """Load fine-tuned weights from disk.
+        """Load fine-tuned weights, preferring local disk over HF Hub
+        over the untrained base model, in that order.
 
-        Loads from ``output_dir`` if it contains a saved model,
-        otherwise loads the base model weights from HuggingFace.
+        Loads from ``output_dir`` if it contains a saved checkpoint.
+        Otherwise falls back to ``ModelConfig.classifier_hf_hub_fallback``
+        — a copy of the fine-tuned weights on HuggingFace Hub, needed
+        because a fresh deployment container won't have ``output_dir``
+        locally (the weights are too large to commit to git). Only if
+        *that* also fails does this fall back to the untrained base
+        ``model_name`` — silently doing so without trying the HF Hub
+        copy first would produce confident-looking but meaningless
+        severity predictions with no error raised.
+
         Call this before predict() if you have already trained.
 
         Raises:
-            FileNotFoundError: If output_dir does not contain a
-                valid model and HuggingFace cannot fetch the base.
+            FileNotFoundError: If no source has a valid model and
+                HuggingFace cannot fetch the base either.
         """
         from transformers import AutoModelForSequenceClassification
 
-        source = (
-            str(self._output_dir)
-            if self._output_dir.exists()
-            else self._model_name
-        )
+        if self._output_dir.exists():
+            source = str(self._output_dir)
+        elif ModelConfig.classifier_hf_hub_fallback:
+            source = ModelConfig.classifier_hf_hub_fallback
+            logger.warning(
+                "No local checkpoint at %s — loading fine-tuned weights "
+                "from HF Hub fallback (%s) instead of the untrained "
+                "base model.", self._output_dir, source,
+            )
+        else:
+            source = self._model_name
+            logger.warning(
+                "No local checkpoint and no HF Hub fallback configured "
+                "— loading UNTRAINED base model %s. Severity "
+                "predictions will be meaningless.", source,
+            )
         logger.info("Loading classifier from: %s", source)
 
         self._model = _from_pretrained_offline_first(

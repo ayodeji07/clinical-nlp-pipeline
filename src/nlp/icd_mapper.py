@@ -565,6 +565,45 @@ class ICD10Mapper:
                 cached.shape[0], len(self._df),
             )
 
+        # Try downloading a precomputed copy from HF Hub before resorting
+        # to a 15-40+ minute CPU rebuild — e.g. a fresh deployment
+        # container that doesn't bundle data/processed/ locally (the
+        # file is too large to commit to git).
+        from src.utils.config import ModelConfig
+        hub_repo = ModelConfig.icd10_embeddings_hf_hub_fallback
+        if hub_repo:
+            try:
+                from huggingface_hub import hf_hub_download
+                logger.info(
+                    "No local embedding cache — downloading precomputed "
+                    "index from HF Hub (%s) instead of rebuilding from "
+                    "scratch.", hub_repo,
+                )
+                downloaded_path = hf_hub_download(
+                    repo_id  = hub_repo,
+                    repo_type = "dataset",
+                    filename = "icd10_embeddings.pt",
+                )
+                cached = torch.load(downloaded_path)
+                if cached.shape[0] == len(self._df):
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save(cached, cache_path)
+                    logger.info(
+                        "Loaded embedding index from HF Hub (%d vectors), "
+                        "cached locally to %s", cached.shape[0], cache_path,
+                    )
+                    return cached
+                logger.warning(
+                    "HF Hub embedding index size (%d) does not match "
+                    "current ICD-10 table (%d) — rebuilding instead.",
+                    cached.shape[0], len(self._df),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not download embedding index from HF Hub "
+                    "(%s) — rebuilding from scratch instead.", exc,
+                )
+
         logger.info(
             "Building ICD-10 embedding index (%d descriptions) — "
             "one-time cost on CPU, can take 15-40+ minutes. "

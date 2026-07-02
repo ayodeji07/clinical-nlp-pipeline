@@ -142,6 +142,28 @@ class ModelConfig:
     # Directory where fine-tuned weights are saved after training
     fine_tuned_dir: Path = Paths.models / "severity_classifier"
 
+    # HF Hub repo holding a copy of the fine-tuned classifier weights —
+    # used as a fallback when fine_tuned_dir doesn't exist locally (e.g.
+    # a fresh deployment container that doesn't bundle data/models/,
+    # since the trained weights are too large to commit to git). Without
+    # this, ClinicalClassifier.load() would silently fall back to the
+    # UNTRAINED base classifier_model and produce garbage predictions
+    # with no error. Empty string disables the fallback.
+    classifier_hf_hub_fallback: str = os.getenv(
+        "CLASSIFIER_HF_HUB_FALLBACK",
+        "ayodeji21/clinical-severity-classifier",
+    )
+
+    # HF Hub dataset repo holding the precomputed ICD-10 embedding index
+    # — used as a fallback when the local disk cache
+    # (data/processed/icd10_embeddings.pt) doesn't exist, avoiding a
+    # 15-40+ minute rebuild from scratch on a fresh deployment. Empty
+    # string disables the fallback (falls through to local rebuild).
+    icd10_embeddings_hf_hub_fallback: str = os.getenv(
+        "ICD10_EMBEDDINGS_HF_HUB_FALLBACK",
+        "ayodeji21/clinical-icd10-embeddings",
+    )
+
 
 class ClassifierConfig:
     """Parameters for the severity classification task.
