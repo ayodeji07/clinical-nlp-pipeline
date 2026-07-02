@@ -276,6 +276,10 @@ class ICD10Mapper:
             else pd.read_csv(chosen, dtype=str)
         )
 
+        # Accept 'code' (from fetch_icd10.py) or 'icd10_code' (processed parquet)
+        if "code" in df.columns and "icd10_code" not in df.columns:
+            df = df.rename(columns={"code": "icd10_code"})
+
         # Ensure we have the columns we need
         required = {"icd10_code", "description"}
         missing  = required - set(df.columns)
@@ -284,10 +288,6 @@ class ICD10Mapper:
                 f"ICD-10 file is missing columns: {missing}. "
                 f"Got: {list(df.columns)}"
             )
-
-        # Accept 'code' (from fetch_icd10.py) or 'icd10_code' (processed parquet)
-        if "code" in df.columns and "icd10_code" not in df.columns:
-            df = df.rename(columns={"code": "icd10_code"})
 
         # Normalise: strip whitespace, uppercase codes
         df["icd10_code"]   = df["icd10_code"].str.strip().str.upper()
