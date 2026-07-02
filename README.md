@@ -1,3 +1,12 @@
+---
+title: Clinical Nlp Api
+emoji: 🌍
+colorFrom: green
+colorTo: pink
+sdk: docker
+pinned: false
+---
+
 # Clinical NLP Pipeline
 
 **NLP · Named Entity Recognition · Clinical Text Mining · BERT Fine-tuning**
