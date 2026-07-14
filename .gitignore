@@ -37,6 +37,9 @@ data/models/
 *.sqlite
 *.sqlite3
 
+# Batch run output logs
+*.log
+
 # Notebooks
 .ipynb_checkpoints/
 

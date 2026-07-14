@@ -162,6 +162,7 @@ def load_icd10_mappings(mappings: list[dict]) -> int:
                 description  = m.get("description", ""),
                 match_method = m.get("match_method", "unknown"),
                 confidence   = m.get("confidence", 0.0),
+                rank         = m.get("rank", 1),
             )
             session.add(record)
             inserted += 1

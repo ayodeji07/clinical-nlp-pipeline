@@ -676,9 +676,13 @@ class ICD10Mapper:
                     )
                     self._embed_model = SentenceTransformer(model_name)
 
-            # Build (or load from disk cache) the ICD-10 embedding index
+            # Build (or load from disk cache) the ICD-10 embedding index.
+            # The cache is saved from whatever device originally built it
+            # (often CPU) -- move it onto the embedding model's device so
+            # cos_sim() below never sees a CPU/CUDA tensor mismatch.
             if self._embeddings is None:
                 self._embeddings = self._load_or_build_embedding_index()
+                self._embeddings = self._embeddings.to(self._embed_model.device)
 
             query_embedding = self._embed_model.encode(
                 text, convert_to_tensor=True
