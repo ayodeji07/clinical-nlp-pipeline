@@ -309,7 +309,12 @@ class ClinicalClassifier:
 
     # ── Training ──────────────────────────────────────────────────
 
-    def train(self, df: pd.DataFrame, resume: bool = True) -> dict[str, float]:
+    def train(
+        self,
+        df: pd.DataFrame,
+        resume: bool = True,
+        weighted_loss: bool = False,
+    ) -> dict[str, float]:
         """Fine-tune the base model on labelled clinical notes.
 
         Splits data into train / validation / test sets, trains
@@ -331,11 +336,18 @@ class ClinicalClassifier:
                 interrupted session does not throw away prior
                 fine-tuning progress. Pass ``False`` to force training
                 from the base model regardless of any existing checkpoint.
+            weighted_loss: If ``True``, weight the cross-entropy loss
+                inversely to each class's frequency in the training
+                split (``n_samples / (n_classes * n_samples_c)``, the
+                standard "balanced" formula). Use this when one class
+                is under-represented (e.g. "critical" at ~15% of
+                severity data) and the model is under-predicting it.
 
         Returns:
-            Dict with final evaluation metrics:
-            ``val_accuracy``, ``val_f1``, ``test_accuracy``,
-            ``test_f1``.
+            Dict with final evaluation metrics: ``val_accuracy``,
+            ``val_f1``, ``test_accuracy``, ``test_f1``, and
+            ``test_report`` (a full per-class precision/recall/F1
+            breakdown from ``sklearn.metrics.classification_report``).
 
         Raises:
             KeyError: If the required columns are not present.
@@ -450,6 +462,21 @@ class ClinicalClassifier:
             num_training_steps = total_steps,
         )
 
+        # ── Class weights ─────────────────────────────────────────
+        # Balanced formula: n_samples / (n_classes * n_samples_c).
+        # Computed from the actual training split, not the full
+        # dataset, since that's the distribution the model sees.
+        loss_weight = None
+        if weighted_loss:
+            n_train, n_classes = len(y_train), len(self._labels)
+            counts = [max(y_train.count(i), 1) for i in range(n_classes)]
+            weights = [n_train / (n_classes * c) for c in counts]
+            loss_weight = torch.tensor(weights, dtype=torch.float32, device=device)
+            logger.info(
+                "Weighted loss enabled: %s",
+                dict(zip(self._labels, (round(w, 3) for w in weights))),
+            )
+
         # ── Training loop ─────────────────────────────────────────
         # When resuming, evaluate the loaded checkpoint first so a
         # worse early epoch doesn't overwrite a better prior result.
@@ -473,7 +500,14 @@ class ClinicalClassifier:
                 optimizer.zero_grad()
                 batch     = {k: v.to(device) for k, v in batch.items()}
                 outputs   = self._model(**batch)
-                loss      = outputs.loss
+                # Always compute loss manually via F.cross_entropy rather
+                # than relying on outputs.loss (the model's internal loss
+                # is unweighted) -- passing weight=None reproduces the
+                # model's default behaviour exactly when weighted_loss
+                # is off, so this is a single code path either way.
+                loss = torch.nn.functional.cross_entropy(
+                    outputs.logits, batch["labels"], weight=loss_weight
+                )
                 epoch_loss += loss.item()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self._model.parameters(), 1.0)
@@ -505,13 +539,33 @@ class ClinicalClassifier:
         # ── Final evaluation on test set ──────────────────────────
         logger.info("Loading best checkpoint for test evaluation...")
         self.load()
+        # load() always places the model on CPU -- move it back to the
+        # training device or GPU runs crash here with a device mismatch
+        # against the CUDA-resident evaluation batches.
+        self._model.to(device)
         test_metrics = self._evaluate(test_loader, device)
+
+        from sklearn.metrics import classification_report
+        test_report = classification_report(
+            test_metrics["labels"], test_metrics["preds"],
+            target_names = self._labels,
+            labels       = list(range(len(self._labels))),
+            output_dict  = True,
+            zero_division = 0,
+        )
+        for lbl in self._labels:
+            m = test_report[lbl]
+            logger.info(
+                "  %-10s precision=%.3f  recall=%.3f  f1=%.3f  (n=%d)",
+                lbl, m["precision"], m["recall"], m["f1-score"], m["support"],
+            )
 
         results = {
             "val_accuracy":  best_val_acc,
             "val_f1":        best_val_f1,
             "test_accuracy": test_metrics["accuracy"],
             "test_f1":       test_metrics["f1"],
+            "test_report":   test_report,
         }
         logger.info(
             "Training complete — test_acc=%.4f  test_f1=%.4f",
@@ -551,6 +605,8 @@ class ClinicalClassifier:
                 all_labels, all_preds,
                 average="weighted", zero_division=0,
             ),
+            "labels": all_labels,
+            "preds":  all_preds,
         }
 
     # ── Inference ─────────────────────────────────────────────────
