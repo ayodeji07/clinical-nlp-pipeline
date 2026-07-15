@@ -36,7 +36,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.utils.config import Paths, settings
+from src.utils.config import Paths
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

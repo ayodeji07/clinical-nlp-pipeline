@@ -49,7 +49,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.utils.config import ICD10Config, Paths, settings
+from src.utils.config import ICD10Config, Paths
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -646,7 +646,6 @@ class ICD10Mapper:
             return []
 
         try:
-            import numpy as np
             from sentence_transformers import SentenceTransformer, util
 
             # Load the embedding model once and cache it.

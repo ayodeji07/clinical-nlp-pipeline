@@ -11,7 +11,7 @@ graceful handling of missing dependencies.
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pandas as pd
 import pytest

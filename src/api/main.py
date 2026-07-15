@@ -36,7 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import entities, icd, notes
 from src.api.schemas import HealthResponse
 from src.db.connection import check_connection, create_all_tables
-from src.utils.config import APIConfig, settings
+from src.utils.config import APIConfig
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

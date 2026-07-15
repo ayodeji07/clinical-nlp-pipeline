@@ -35,7 +35,6 @@ import re
 
 import pandas as pd
 
-from src.utils.config import ClassifierConfig, settings
 from src.utils.logger import get_logger
 from src.utils.text_utils import clean_clinical_text, word_count
 

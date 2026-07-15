@@ -42,7 +42,6 @@ from src.utils.config import (
     ModelConfig,
     TrainingConfig,
     force_offline_hf_env,
-    settings,
 )
 from src.utils.logger import get_logger
 
@@ -363,7 +362,6 @@ class ClinicalClassifier:
 
         import torch
         from sklearn.model_selection import train_test_split
-        from sklearn.metrics import accuracy_score, f1_score
         from torch.utils.data import DataLoader
         from torch.optim import AdamW
         from transformers import (

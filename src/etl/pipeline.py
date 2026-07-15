@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from src.etl.extract import load_clinical_notes, load_icd10_codes
 from src.etl.transform import prepare_for_training
 from src.etl.load import load_clinical_notes as persist_notes
-from src.utils.config import Paths, settings
+from src.utils.config import Paths
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

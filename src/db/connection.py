@@ -50,7 +50,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
 
-from src.utils.config import DatabaseConfig, settings
+from src.utils.config import DatabaseConfig
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

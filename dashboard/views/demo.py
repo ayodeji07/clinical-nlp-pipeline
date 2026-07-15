@@ -161,8 +161,8 @@ def render() -> None:
         if probs:
             import plotly.graph_objects as go
             labels = list(probs.keys())
-            values = [probs[l] for l in labels]
-            colours_list = [_SEVERITY_COLOURS.get(l, "#95a5a6") for l in labels]
+            values = [probs[lbl] for lbl in labels]
+            colours_list = [_SEVERITY_COLOURS.get(lbl, "#95a5a6") for lbl in labels]
             fig = go.Figure(go.Bar(
                 x           = labels,
                 y           = values,
@@ -193,7 +193,7 @@ def render() -> None:
                 x            = labels,
                 y            = values,
                 marker_color = [
-                    _LABEL_COLOURS.get(l, "#95a5a6") for l in labels
+                    _LABEL_COLOURS.get(lbl, "#95a5a6") for lbl in labels
                 ],
                 text         = values,
                 textposition = "outside",

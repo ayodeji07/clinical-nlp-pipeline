@@ -38,10 +38,10 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
-from src.utils.config import ModelConfig, settings
+from src.utils.config import ModelConfig
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

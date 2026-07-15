@@ -35,7 +35,6 @@ def render() -> None:
 
     # ── Load metrics from saved model directory ────────────────────
     import json
-    from pathlib import Path
     from src.utils.config import ModelConfig
 
     metrics_path = ModelConfig.fine_tuned_dir / "training_metrics.json"
@@ -166,7 +165,6 @@ def render() -> None:
 def _render_placeholder_metrics() -> None:
     """Show placeholder charts when no trained model exists yet."""
     import plotly.graph_objects as go
-    import numpy as np
 
     st.markdown("### Expected performance (reference)")
     st.caption(

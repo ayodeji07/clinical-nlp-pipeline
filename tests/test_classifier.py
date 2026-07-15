@@ -10,7 +10,7 @@ the test suite runs without GPU or internet access.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -74,7 +74,6 @@ class TestClinicalClassifier:
     def test_predict_returns_classification_result(self):
         """predict() with mocked model returns a ClassificationResult."""
         import torch
-        import numpy as np
 
         clf = self._make_classifier(task="severity")
 

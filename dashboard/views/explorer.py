@@ -156,8 +156,8 @@ def render() -> None:
         if sev:
             import plotly.graph_objects as go
             labels = ["routine", "urgent", "critical"]
-            values = [sev.get(l, 0) for l in labels]
-            colours_list = [_SEVERITY_COLOURS[l] for l in labels]
+            values = [sev.get(lbl, 0) for lbl in labels]
+            colours_list = [_SEVERITY_COLOURS[lbl] for lbl in labels]
             fig_sev = go.Figure(go.Pie(
                 labels    = labels,
                 values    = values,
