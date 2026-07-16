@@ -200,7 +200,17 @@ def _build_pyvis_html(pairs: list[dict]) -> str | None:
     # Compute degree centrality for node sizing
     centrality = nx.degree_centrality(graph)
 
-    net = Network(height="600px", bgcolor="#ffffff", font_color="#333333")
+    # cdn_resources="in_line" is required here -- pyvis's default HTML
+    # references lib/bindings/utils.js via a relative path, which 404s
+    # when the generated HTML is injected into an iframe via
+    # st.components.v1.html() (no files are actually served alongside
+    # it). That file is what wires up node label rendering, so without
+    # this the graph still draws (nodes/edges load fine from a CDN) but
+    # every label silently fails to render.
+    net = Network(
+        height="600px", bgcolor="#ffffff", font_color="#333333",
+        cdn_resources="in_line",
+    )
 
     for node in graph.nodes():
         size = max(10, min(40, int(centrality[node] * 200)))
