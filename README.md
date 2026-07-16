@@ -33,7 +33,7 @@ from unstructured medical notes using state-of-the-art biomedical NLP models.
 
 ## Live demo
 
-🔗 [clinical-nlp.streamlit.app](https://clinical-nlp.streamlit.app) *(deploy your own — see VSCODE_GUIDE.md)*
+🔗 [clinical-nlp-pipeline.streamlit.app](https://clinical-nlp-pipeline.streamlit.app) *(deploy your own — see VSCODE_GUIDE.md)*
 
 ---
 
@@ -59,6 +59,25 @@ Full step-by-step instructions: **[VSCODE_GUIDE.md](VSCODE_GUIDE.md)**
 
 ---
 
+## Batch processing
+
+Once the ETL pipeline has loaded notes into the database, these scripts
+populate entities, ICD-10 mappings, and the severity classifier against
+stored data. All three are idempotent and resumable — safe to interrupt
+and re-run without creating duplicates:
+
+```bash
+python scripts/run_ner_batch.py              # extract entities from stored notes
+python scripts/run_icd10_batch.py            # map DISEASE/SYMPTOM entities to ICD-10 codes
+python scripts/train_severity_classifier.py  # fine-tune the severity classifier
+```
+
+Each accepts `--limit N` for a quick subset run. `run_icd10_batch.py`
+also maintains an on-disk cache (`data/processed/icd10_mapping_cache.json`)
+so a restart skips re-attempting entities already checked, matched or not.
+
+---
+
 ## Tech stack
 
 | Layer | Library |
@@ -71,7 +90,7 @@ Full step-by-step instructions: **[VSCODE_GUIDE.md](VSCODE_GUIDE.md)**
 | Database | SQLAlchemy (SQLite local / PostgreSQL cloud) |
 | Dashboard | Streamlit |
 | Visualisation | Plotly + NetworkX + pyvis |
-| Testing | pytest (61 tests) |
+| Testing | pytest (65 tests) |
 | CI/CD | GitHub Actions |
 
 ---
@@ -95,7 +114,7 @@ notebooks/
   02_icd_mapping.ipynb
   03_classification.ipynb   ← fine-tune Bio_ClinicalBERT
   04_visualisation.ipynb
-tests/          pytest test suite — 61 tests, 0 dependencies on GPU
+tests/          pytest test suite — 65 tests, 0 dependencies on GPU
 sql/            schema.sql for Supabase migration
 ```
 
@@ -121,7 +140,14 @@ MTSamples has no severity labels, so we derive them using weak supervision:
 | `routine` | Elective, outpatient, follow-up, stable, screening |
 
 The classifier learns to generalise beyond these keyword rules.
-Expected performance: ~75–80% accuracy, ~0.75 weighted F1 on MTSamples.
+
+Current performance (Bio_ClinicalBERT, class-weighted loss, retrained 2026-07-15):
+~67% overall test accuracy/F1. Per-class breakdown on `critical` — the
+safety-relevant class — is what matters most here: **precision 0.558,
+recall 0.829, F1 0.667** (up from an unweighted-loss baseline of recall
+0.486, F1 0.515). The loss is deliberately weighted to favour catching
+critical cases over aggregate accuracy, since missing a true critical
+note is far costlier than a false positive.
 
 ---
 
@@ -139,7 +165,7 @@ Total cloud cost for a portfolio demo: **£0/month**.
 ## Running tests
 
 ```bash
-pytest                              # all 61 tests
+pytest                              # all 65 tests
 pytest --cov=src                    # with coverage
 pytest tests/test_ner.py -v         # one file
 ```
