@@ -216,7 +216,7 @@ def _build_pyvis_html(pairs: list[dict]) -> str | None:
         size = max(10, min(40, int(centrality[node] * 200)))
         net.add_node(
             node,
-            label = node,
+            label = f"{node} ({graph.degree(node)})",
             size  = size,
             # vis-network deliberately disables HTML parsing in tooltips
             # (XSS protection, since entity text comes straight from the
