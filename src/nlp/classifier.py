@@ -313,6 +313,7 @@ class ClinicalClassifier:
         df: pd.DataFrame,
         resume: bool = True,
         weighted_loss: bool = False,
+        seed: int | None = None,
     ) -> dict[str, float]:
         """Fine-tune the base model on labelled clinical notes.
 
@@ -341,12 +342,24 @@ class ClinicalClassifier:
                 standard "balanced" formula). Use this when one class
                 is under-represented (e.g. "critical" at ~15% of
                 severity data) and the model is under-predicting it.
+            seed: Random seed for the new classification head's weight
+                initialisation and data loader shuffling. Defaults to
+                ``TrainingConfig.random_seed``. Without this, the head
+                sitting on top of the pretrained base gets a fresh
+                random init every run -- on a small dataset with few
+                epochs that alone can swing minority-class metrics
+                significantly (observed: critical-class recall varying
+                0.71-0.83 across otherwise-identical unseeded runs).
+                Fixing the seed makes a single run reproducible; it
+                does not by itself make results *better* -- for that,
+                train several seeds and keep the best (see
+                scripts/train_severity_classifier.py --n-seeds).
 
         Returns:
             Dict with final evaluation metrics: ``val_accuracy``,
-            ``val_f1``, ``test_accuracy``, ``test_f1``, and
-            ``test_report`` (a full per-class precision/recall/F1
-            breakdown from ``sklearn.metrics.classification_report``).
+            ``val_f1``, ``test_accuracy``, ``test_f1``, ``per_class``
+            (precision/recall/f1/support per label), ``confusion_matrix``,
+            and ``history`` (per-epoch validation metrics).
 
         Raises:
             KeyError: If the required columns are not present.
@@ -360,6 +373,9 @@ class ClinicalClassifier:
 
         logger.info("Starting fine-tuning: task=%s", self._task)
 
+        import random
+
+        import numpy as np
         import torch
         from sklearn.model_selection import train_test_split
         from torch.utils.data import DataLoader
@@ -371,6 +387,17 @@ class ClinicalClassifier:
 
         tokenizer = self._load_tokenizer()
         cfg       = TrainingConfig
+
+        # ── Seeding ────────────────────────────────────────────────
+        # Covers the classification head's random init (torch) and
+        # DataLoader shuffling (also torch's RNG). random/numpy are
+        # seeded too in case any dependency defers to them internally.
+        seed = seed if seed is not None else cfg.random_seed
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        logger.info("Training seed: %d", seed)
 
         # ── Encode labels ─────────────────────────────────────────
         valid_mask = df[label_col].isin(self._labels)

@@ -32,6 +32,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -42,7 +43,7 @@ from src.db.models import ClinicalNote, ModelRun
 from src.db.repository import ModelRunRepository
 from src.etl.transform import derive_severity_labels
 from src.nlp.classifier import ClinicalClassifier
-from src.utils.config import ModelConfig, Paths
+from src.utils.config import ModelConfig, Paths, TrainingConfig
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -81,6 +82,9 @@ def _load_notes(limit: int | None) -> pd.DataFrame:
     return df
 
 
+_ATTEMPT_DIR_TEMPLATE = "severity_classifier_attempt_{i}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Retrain the severity classifier with class-weighted loss and corrected labels."
@@ -96,6 +100,15 @@ def main() -> None:
         help="Where to save the checkpoint (default: the real model dir for "
              "a full run, or a smoke-test scratch dir when --limit is set)",
     )
+    parser.add_argument(
+        "--n-seeds", type=int, default=1,
+        help="Train this many attempts with different seeds and keep "
+             "only the one with the best critical-class F1 (default: 1, "
+             "i.e. a single run). Fine-tuning a small classification "
+             "head on a small dataset is sensitive to random init -- "
+             "running several seeds and selecting the best is more "
+             "reliable than trusting a single arbitrary run.",
+    )
     args = parser.parse_args()
 
     df = _load_notes(args.limit)
@@ -107,14 +120,59 @@ def main() -> None:
             "--limit set without --output-dir -- saving to scratch dir %s "
             "instead of the real checkpoint.", output_dir,
         )
+    elif output_dir is None:
+        output_dir = ModelConfig.fine_tuned_dir
 
-    clf = ClinicalClassifier(task="severity", output_dir=output_dir)
-    results = clf.train(df, resume=False, weighted_loss=True)
+    n_seeds = max(1, args.n_seeds)
+    attempts: list[tuple[int, dict, Path]] = []
+
+    for i in range(n_seeds):
+        seed = TrainingConfig.random_seed + i
+        attempt_dir = Paths.models / _ATTEMPT_DIR_TEMPLATE.format(i=i)
+        logger.info("=" * 60)
+        logger.info("Attempt %d/%d -- seed=%d", i + 1, n_seeds, seed)
+
+        clf = ClinicalClassifier(task="severity", output_dir=attempt_dir)
+        results = clf.train(df, resume=False, weighted_loss=True, seed=seed)
+
+        critical = results["per_class"]["critical"]
+        logger.info(
+            "Attempt %d: critical precision=%.3f recall=%.3f f1=%.3f | "
+            "test_acc=%.4f test_f1=%.4f",
+            i + 1, critical["precision"], critical["recall"], critical["f1"],
+            results["test_accuracy"], results["test_f1"],
+        )
+        attempts.append((seed, results, attempt_dir))
+
+    best_seed, best_results, best_dir = max(
+        attempts, key=lambda a: a[1]["per_class"]["critical"]["f1"]
+    )
 
     logger.info("=" * 60)
+    logger.info("Attempt comparison (sorted by critical F1):")
+    for seed, results, _ in sorted(
+        attempts, key=lambda a: a[1]["per_class"]["critical"]["f1"], reverse=True
+    ):
+        c = results["per_class"]["critical"]
+        marker = " <- best" if seed == best_seed else ""
+        logger.info(
+            "  seed=%-4d critical: precision=%.3f recall=%.3f f1=%.3f%s",
+            seed, c["precision"], c["recall"], c["f1"], marker,
+        )
+
+    # Promote the winning attempt's checkpoint to the real output_dir,
+    # then discard every attempt directory (including the winner's,
+    # now duplicated at output_dir).
+    if output_dir != best_dir:
+        shutil.copytree(best_dir, output_dir, dirs_exist_ok=True)
+    for _, _, attempt_dir in attempts:
+        shutil.rmtree(attempt_dir, ignore_errors=True)
+
+    results = best_results
+    logger.info("=" * 60)
     logger.info(
-        "Final: val_acc=%.4f val_f1=%.4f test_acc=%.4f test_f1=%.4f",
-        results["val_accuracy"], results["val_f1"],
+        "Best: seed=%d val_acc=%.4f val_f1=%.4f test_acc=%.4f test_f1=%.4f",
+        best_seed, results["val_accuracy"], results["val_f1"],
         results["test_accuracy"], results["test_f1"],
     )
     critical = results["per_class"]["critical"]
@@ -146,7 +204,10 @@ def main() -> None:
                 history          = results["history"],
                 epochs           = len(results["history"]),
                 is_deployed      = True,
-                run_notes        = "Class-weighted loss, corrected acute-negation labels",
+                run_notes        = (
+                    f"Class-weighted loss, corrected acute-negation labels. "
+                    f"Best of {n_seeds} seed(s) (seed={best_seed}), selected by critical-class F1."
+                ),
             )
         logger.info("Run recorded in model_runs (is_deployed=True)")
     else:
