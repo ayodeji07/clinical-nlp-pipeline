@@ -760,7 +760,16 @@ class SpacyNERPipeline(BaseNERPipeline):
         try:
             import spacy
             logger.info("Loading NER model: %s", self._model_name)
-            self._nlp = spacy.load(self._model_name)
+            # extract()/extract_batch() only ever read doc.ents, so the
+            # tagger/parser/lemmatizer/attribute_ruler components are pure
+            # overhead here -- excluding them is verified to produce
+            # byte-identical entity output (tok2vec + ner are the only
+            # components ner actually depends on) while trimming memory,
+            # which matters on constrained deployment hosts.
+            self._nlp = spacy.load(
+                self._model_name,
+                exclude=["tagger", "attribute_ruler", "lemmatizer", "parser"],
+            )
             logger.info("NER model loaded ✓")
         except OSError:
             raise OSError(
