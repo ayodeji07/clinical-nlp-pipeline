@@ -256,7 +256,26 @@ def _build_pyvis_html(pairs: list[dict]) -> str | None:
     }
     """)
 
-    return net.generate_html()
+    html = net.generate_html()
+
+    # vis-network's default stabilization ("fit": true) auto-zooms to fit
+    # the *entire* graph in view -- with many nodes spread out by the
+    # forceAtlas2 layout, that can shrink everything (including labels,
+    # regardless of the font size set above) down to nearly illegible on
+    # screen. "network" is emitted as an implicit global by pyvis's own
+    # generated script (no var/let/const), so it's safe to reference from
+    # an appended script tag that runs after it. Zooming in relative to
+    # whatever the natural fit-to-view scale turns out to be (rather than
+    # a fixed absolute number) adapts to however large or small the
+    # filtered graph is, instead of being wrong at the opposite extreme.
+    zoom_script = """
+    <script type="text/javascript">
+      network.once("stabilizationIterationsDone", function () {
+        network.moveTo({ scale: network.getScale() * 1.8 });
+      });
+    </script>
+    """
+    return html.replace("</body>", zoom_script + "</body>")
 
 
 def _render_fallback_graph(pairs: list[dict]) -> None:
