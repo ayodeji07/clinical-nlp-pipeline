@@ -96,6 +96,21 @@ Stage 2: Transform — 4,721 notes ready
 Stage 3: Load — inserted 4,721 records
 ```
 
+The ETL pipeline only loads notes — it doesn't run NER, ICD-10 mapping,
+or classification against them. Populate those with the batch scripts:
+
+```bash
+python scripts/run_ner_batch.py              # extract entities from stored notes
+python scripts/run_icd10_batch.py            # map DISEASE/SYMPTOM entities to ICD-10 codes
+python scripts/train_severity_classifier.py  # fine-tune the severity classifier
+```
+
+All three are idempotent and resumable, so interrupting and re-running
+is safe. Pass `--limit N` to any of them for a quick subset run instead
+of processing the full dataset. The dashboard's Explorer and Model
+Metrics pages need this step done first — without it there's nothing
+to show beyond raw note counts.
+
 ---
 
 ## Phase 4 — Run the notebooks
@@ -171,7 +186,7 @@ Run with coverage:
 pytest --cov=src --cov-report=term-missing
 ```
 
-Expected: 61 tests pass, ~0 failures.
+Expected: 65 tests pass, ~0 failures.
 
 ---
 
@@ -181,29 +196,56 @@ Expected: 61 tests pass, ~0 failures.
 
 1. Go to https://supabase.com → New project
 2. Choose a region close to your users
-3. Copy the **Connection string** from Settings → Database → URI
-   It looks like: `postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres`
+3. Copy the connection string from Settings → Database — but use the
+   **Pooler** connection string (Transaction or Session mode), not the
+   direct one. It looks like:
+   `postgresql://postgres.<ref>:<password>@aws-<region>.pooler.supabase.com:5432/postgres`
+
+   **Do not use** the direct-connection host
+   (`db.<ref>.supabase.co`) for a deployed app — it resolves to an
+   IPv6-only address, and several free-tier hosts (Render's included)
+   don't support IPv6 egress. You'll get a "Network is unreachable"
+   error at startup that looks like a code bug but is actually just
+   the wrong host. The pooler host is IPv4-compatible and works
+   everywhere.
 
 ### Step 2: Deploy the API
 
 The API needs to be publicly accessible for Streamlit Cloud to reach it.
-Recommended free options:
 
-- **Railway** — https://railway.app (easiest, free tier)
+- **Hugging Face Spaces** (recommended for this project) —
+  https://huggingface.co/new-space, SDK: **Docker**. Push this repo to
+  the Space's git remote and it builds from the existing `Dockerfile`.
+  The free CPU tier has enough RAM (historically ~16GB) to run the full
+  hybrid NER pipeline + ICD-10 embeddings + classifier together without
+  issue — confirmed working in production for this project. Sleeps
+  after 48h of inactivity, not 15 minutes, so it stays warm for normal
+  demo traffic.
+
+- **Railway** — https://railway.app (free tier)
   ```bash
   railway login
   railway up
   ```
   Copy the public URL Railway gives you.
 
-- **Render** — https://render.com (free tier, cold starts)
-  Connect your GitHub repo and set start command:
-  ```
-  uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
-  ```
+- **Render** — https://render.com (free tier) — **be aware its free
+  tier caps out at 512Mi RAM**, which is not enough to run this
+  project's full hybrid NER pipeline (`en_ner_bc5cdr_md` +
+  `en_core_sci_lg`) together with the classifier — a real
+  `/notes/analyse` request will get OOM-killed (502 Bad Gateway),
+  even though `/health` and DB-backed endpoints work fine. If you use
+  Render anyway:
+  - Set `WARM_UP_MODELS=false` so the app can at least boot instead of
+    crash-looping on eager model load at startup.
+  - Set `NER_MODEL=en_ner_bc5cdr_md` (single model instead of
+    `hybrid`) to meaningfully cut memory, at the cost of losing
+    `PROCEDURE`/`ANATOMY`/most `SYMPTOM` entity coverage (bc5cdr alone
+    still detects `DISEASE`/`MEDICATION` — the more important two).
+  - Or upgrade to a paid instance size.
 
-Set the `DATABASE_URL` environment variable to your Supabase URL in the
-Railway/Render dashboard.
+Set `DATABASE_URL` (the pooler string from Step 1) as an environment
+variable on whichever platform you choose.
 
 ### Step 3: Deploy the Streamlit app
 
@@ -213,9 +255,12 @@ Railway/Render dashboard.
 4. Click **Advanced settings** → **Secrets** and add:
 
 ```toml
-API_BASE_URL = "https://your-api.railway.app"
-DATABASE_URL = "postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres"
+API_BASE_URL = "https://<your-username>-<space-name>.hf.space"
+DATABASE_URL = "postgresql://postgres.<ref>:<password>@aws-<region>.pooler.supabase.com:5432/postgres"
 ```
+
+(Swap `API_BASE_URL` for your Railway/Render URL if you went that
+route instead.)
 
 5. Click **Deploy**
 
@@ -312,10 +357,13 @@ calling `clf.predict()`.
 Ensure `uvicorn src.api.main:app --reload` is running in a
 separate terminal and `API_BASE_URL` in `.env` points to it.
 
-**Supabase connection timeout on Streamlit Cloud**
-Add `?sslmode=require` to the end of your DATABASE_URL:
+**Supabase connection timeout / "Network is unreachable" on a deployed host**
+Make sure you're using the *pooler* connection string, not the direct
+one — the direct host (`db.<ref>.supabase.co`) is IPv6-only and
+unreachable from several free-tier hosts (confirmed on Render's free
+tier). Use the pooler host instead, with `?sslmode=require` appended:
 ```
-postgresql://postgres:<pass>@db.<ref>.supabase.co:5432/postgres?sslmode=require
+postgresql://postgres.<ref>:<pass>@aws-<region>.pooler.supabase.com:5432/postgres?sslmode=require
 ```
 
 ---
@@ -330,5 +378,5 @@ src/db/         connection, models, repository
 src/api/        FastAPI app + routes
 dashboard/      Streamlit app + pages
 notebooks/      00–04 walkthrough notebooks
-tests/          pytest test suite (61 tests)
+tests/          pytest test suite (65 tests)
 ```

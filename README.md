@@ -154,8 +154,13 @@ note is far costlier than a false positive.
 ## Deployment
 
 See **[VSCODE_GUIDE.md](VSCODE_GUIDE.md)** — Phase 8 covers:
-- Supabase (free PostgreSQL for the database)
-- Railway or Render (free API hosting)
+- Supabase (free PostgreSQL for the database — use the *pooler*
+  connection string, not the direct one; the direct host is IPv6-only
+  and unreachable from several free-tier hosts)
+- Hugging Face Spaces (free API hosting — has enough RAM for the full
+  hybrid NER + classifier pipeline; Railway/Render are lighter-weight
+  alternatives but Render's free tier specifically doesn't have enough
+  memory for this project's models)
 - Streamlit Cloud (free dashboard hosting)
 
 Total cloud cost for a portfolio demo: **£0/month**.
