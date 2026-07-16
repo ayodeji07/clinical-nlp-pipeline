@@ -262,6 +262,13 @@ class APIConfig:
     # Set to False in production — disables /docs and /redoc
     debug: bool = os.getenv("API_DEBUG", "true").lower() == "true"
 
+    # Eager-load NER/ICD-10/classifier models at startup rather than on
+    # first request. Set to "false" on memory-constrained hosts (e.g.
+    # Render's free 512Mi tier) -- the hybrid NER pipeline + classifier
+    # can OOM-kill the whole process at boot, which no try/except can
+    # catch since it's an OS-level kill, not a Python exception.
+    warm_up_models: bool = os.getenv("WARM_UP_MODELS", "true").lower() == "true"
+
 
 class DatabaseConfig:
     """Database connection settings.

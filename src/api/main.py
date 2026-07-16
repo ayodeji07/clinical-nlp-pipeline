@@ -72,14 +72,24 @@ async def lifespan(app: FastAPI):
     # Most deployment platforms hold off routing traffic until the
     # health check passes, so this cost is absorbed into startup time
     # rather than a real user's request.
-    try:
-        notes.warm_up()
-    except Exception:
-        # Non-fatal: whatever didn't warm up here will load lazily on
-        # whichever request needs it. exc_info=True so a resource-
-        # contention failure (e.g. an import failing under low memory)
-        # is actually diagnosable instead of logging an empty message.
-        logger.error("Model warm-up failed — falling back to lazy loading", exc_info=True)
+    #
+    # Skippable via WARM_UP_MODELS=false -- on a memory-constrained host
+    # (e.g. Render's free 512Mi tier) the hybrid NER pipeline + classifier
+    # can get OOM-killed by the OS at boot, which no try/except below can
+    # catch or recover from since it isn't a Python exception. Skipping
+    # warm-up at least lets the API start and serve DB-backed endpoints;
+    # NLP endpoints will still need enough memory when actually called.
+    if APIConfig.warm_up_models:
+        try:
+            notes.warm_up()
+        except Exception:
+            # Non-fatal: whatever didn't warm up here will load lazily on
+            # whichever request needs it. exc_info=True so a resource-
+            # contention failure (e.g. an import failing under low memory)
+            # is actually diagnosable instead of logging an empty message.
+            logger.error("Model warm-up failed — falling back to lazy loading", exc_info=True)
+    else:
+        logger.info("WARM_UP_MODELS=false — skipping eager model load, will load lazily per-request")
 
     logger.info("API ready at http://%s:%s", APIConfig.host, APIConfig.port)
 
