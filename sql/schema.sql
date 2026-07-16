@@ -61,6 +61,11 @@ CREATE TABLE IF NOT EXISTS model_runs (
     training_samples INTEGER,
     val_accuracy     REAL,
     val_f1           REAL,
+    test_accuracy    REAL,
+    test_f1          REAL,
+    per_class        JSON,
+    confusion_matrix JSON,
+    history          JSON,
     epochs           INTEGER,
     is_deployed      INTEGER NOT NULL DEFAULT 0,
     run_notes        TEXT,
@@ -68,3 +73,11 @@ CREATE TABLE IF NOT EXISTS model_runs (
 );
 
 CREATE INDEX IF NOT EXISTS ix_model_runs_task ON model_runs (task);
+
+-- Migration for an existing model_runs table created before these
+-- columns existed (safe to re-run -- IF NOT EXISTS guards each one):
+-- ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS test_accuracy REAL;
+-- ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS test_f1 REAL;
+-- ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS per_class JSON;
+-- ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS confusion_matrix JSON;
+-- ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS history JSON;

@@ -36,6 +36,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Float,
@@ -297,6 +298,26 @@ class ModelRun(Base):
     val_f1: Mapped[float | None] = mapped_column(
         Float, nullable=True,
         comment="Weighted F1 score on validation set",
+    )
+    test_accuracy: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+        comment="Held-out test set accuracy (0.0-1.0)",
+    )
+    test_f1: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+        comment="Weighted F1 score on the held-out test set",
+    )
+    per_class: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True,
+        comment="Per-class {label: {precision, recall, f1, support}} on the test set",
+    )
+    confusion_matrix: Mapped[list | None] = mapped_column(
+        JSON, nullable=True,
+        comment="Test-set confusion matrix, rows=actual/cols=predicted, class order matches ClassifierConfig labels",
+    )
+    history: Mapped[list | None] = mapped_column(
+        JSON, nullable=True,
+        comment="Per-epoch [{epoch, loss, accuracy, f1}] validation history",
     )
     epochs: Mapped[int | None] = mapped_column(
         Integer, nullable=True,

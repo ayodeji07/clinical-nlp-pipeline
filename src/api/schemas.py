@@ -279,3 +279,28 @@ class ModelRunSummary(BaseModel):
     created_at:       datetime
 
     model_config = {"from_attributes": True}
+
+
+class ModelMetricsResponse(BaseModel):
+    """Full metrics for the currently deployed classifier run.
+
+    Returned by GET /model/metrics. Read by the dashboard's Model
+    Metrics page instead of a local file, since the dashboard process
+    never has direct access to the classifier or its checkpoint --
+    only the API does.
+    """
+
+    model_name:       str
+    task:             str
+    training_samples: Optional[int]                = None
+    val_accuracy:     Optional[float]               = None
+    val_f1:           Optional[float]               = None
+    test_accuracy:    Optional[float]                = None
+    test_f1:          Optional[float]                = None
+    per_class:        Optional[dict[str, dict[str, float]]] = None
+    confusion_matrix: Optional[list[list[int]]]      = None
+    history:          Optional[list[dict]]           = None
+    run_notes:        Optional[str]                  = None
+    created_at:       datetime
+
+    model_config = {"from_attributes": True}

@@ -38,10 +38,11 @@ import pandas as pd
 from sqlalchemy import select
 
 from src.db.connection import get_session
-from src.db.models import ClinicalNote
+from src.db.models import ClinicalNote, ModelRun
+from src.db.repository import ModelRunRepository
 from src.etl.transform import derive_severity_labels
 from src.nlp.classifier import ClinicalClassifier
-from src.utils.config import Paths
+from src.utils.config import ModelConfig, Paths
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -116,11 +117,40 @@ def main() -> None:
         results["val_accuracy"], results["val_f1"],
         results["test_accuracy"], results["test_f1"],
     )
-    critical = results["test_report"]["critical"]
+    critical = results["per_class"]["critical"]
     logger.info(
-        "Critical class: precision=%.3f recall=%.3f f1=%.3f (was precision=0.548 recall=0.486 f1=0.515)",
-        critical["precision"], critical["recall"], critical["f1-score"],
+        "Critical class: precision=%.3f recall=%.3f f1=%.3f",
+        critical["precision"], critical["recall"], critical["f1"],
     )
+
+    # Record this run in the DB -- what the dashboard's Model Metrics
+    # page and the /model/metrics API endpoint actually read from.
+    # Skipped for smoke-test runs (--limit set): a tiny/partial run
+    # shouldn't overwrite the real deployed model's recorded metrics.
+    if args.limit is None:
+        with get_session() as session:
+            session.query(ModelRun).filter_by(
+                task="severity", is_deployed=True
+            ).update({"is_deployed": False})
+            ModelRunRepository.create(
+                session,
+                model_name       = ModelConfig.classifier_model,
+                task             = "severity",
+                training_samples = len(df),
+                val_accuracy     = results["val_accuracy"],
+                val_f1           = results["val_f1"],
+                test_accuracy    = results["test_accuracy"],
+                test_f1          = results["test_f1"],
+                per_class        = results["per_class"],
+                confusion_matrix = results["confusion_matrix"],
+                history          = results["history"],
+                epochs           = len(results["history"]),
+                is_deployed      = True,
+                run_notes        = "Class-weighted loss, corrected acute-negation labels",
+            )
+        logger.info("Run recorded in model_runs (is_deployed=True)")
+    else:
+        logger.info("--limit set -- skipping model_runs DB record (smoke test)")
 
 
 if __name__ == "__main__":

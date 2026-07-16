@@ -33,7 +33,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import entities, icd, notes
+from src.api.routes import entities, icd, model, notes
 from src.api.schemas import HealthResponse
 from src.db.connection import check_connection, create_all_tables
 from src.utils.config import APIConfig
@@ -127,6 +127,7 @@ app.add_middleware(
 app.include_router(notes.router)
 app.include_router(entities.router)
 app.include_router(icd.router)
+app.include_router(model.router)
 
 
 # ── Health check ──────────────────────────────────────────────────

@@ -248,6 +248,31 @@ def get_cooccurrence_pairs(
 
 # ── ICD-10 ────────────────────────────────────────────────────────
 
+def get_model_metrics(task: str = "severity") -> Optional[dict[str, Any]]:
+    """Fetch training metrics for the currently deployed classifier.
+
+    Args:
+        task: Classification task to look up (default: "severity").
+
+    Returns:
+        ModelMetricsResponse dict, or None if unreachable or no run
+        has been recorded yet (API returns 404 in that case).
+    """
+    try:
+        resp = requests.get(
+            f"{_base_url()}/model/metrics",
+            params  = {"task": task},
+            timeout = _TIMEOUT,
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.error("get_model_metrics failed: %s", exc)
+        return None
+
+
 def lookup_icd10(text: str, top_k: int = 3) -> Optional[dict[str, Any]]:
     """Map a free-text entity to ICD-10 candidates.
 

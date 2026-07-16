@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from dashboard.api_client import get_model_metrics
+
 
 def render() -> None:
     """Render the Model Metrics page."""
@@ -33,34 +35,32 @@ def render() -> None:
 
     st.markdown("---")
 
-    # ── Load metrics from saved model directory ────────────────────
-    import json
-    from src.utils.config import ModelConfig
+    # ── Load metrics via the API ────────────────────────────────────
+    # Fetched from the API, not a local file -- the dashboard process
+    # never has direct access to the classifier or its checkpoint,
+    # only the API does. See src/api/routes/model.py.
+    metrics = get_model_metrics(task="severity")
 
-    metrics_path = ModelConfig.fine_tuned_dir / "training_metrics.json"
-
-    if not metrics_path.exists():
+    if metrics is None:
         st.info(
-            "No trained model found yet.  "
-            "Run the training notebook to fine-tune Bio_ClinicalBERT:\n\n"
-            "```\nnotebooks/03_classification.ipynb\n```"
+            "No trained model run recorded yet.  "
+            "Run the training script to fine-tune Bio_ClinicalBERT "
+            "and record the results:\n\n"
+            "```\npython scripts/train_severity_classifier.py\n```"
         )
         _render_placeholder_metrics()
         return
 
-    with open(metrics_path) as fh:
-        metrics = json.load(fh)
-
     # ── Summary metrics ───────────────────────────────────────────
     st.markdown("### Final Performance")
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Val Accuracy",  f"{metrics.get('val_accuracy',  0):.1%}")
-    m2.metric("Val F1",        f"{metrics.get('val_f1',        0):.3f}")
-    m3.metric("Test Accuracy", f"{metrics.get('test_accuracy', 0):.1%}")
-    m4.metric("Test F1",       f"{metrics.get('test_f1',       0):.3f}")
+    m1.metric("Val Accuracy",  f"{metrics.get('val_accuracy')  or 0:.1%}")
+    m2.metric("Val F1",        f"{metrics.get('val_f1')        or 0:.3f}")
+    m3.metric("Test Accuracy", f"{metrics.get('test_accuracy') or 0:.1%}")
+    m4.metric("Test F1",       f"{metrics.get('test_f1')       or 0:.3f}")
 
     # ── Per-class breakdown ───────────────────────────────────────
-    per_class = metrics.get("per_class", {})
+    per_class = metrics.get("per_class") or {}
     if per_class:
         st.markdown("### Per-class Performance")
         import plotly.graph_objects as go
@@ -156,7 +156,7 @@ def render() -> None:
         st.plotly_chart(fig_hist, use_container_width=True)
 
     # ── Model notes ───────────────────────────────────────────────
-    notes = metrics.get("notes")
+    notes = metrics.get("run_notes")
     if notes:
         st.markdown("### Training Notes")
         st.markdown(notes)
@@ -200,6 +200,6 @@ def _render_placeholder_metrics() -> None:
     )
     st.plotly_chart(fig, use_container_width=True)
     st.caption(
-        "Train the model using `notebooks/03_classification.ipynb` "
+        "Run `python scripts/train_severity_classifier.py` "
         "to see your actual results here."
     )

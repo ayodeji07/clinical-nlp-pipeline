@@ -524,7 +524,10 @@ class ClinicalClassifier:
                 val_metrics["f1"],
             )
             metrics_history.append({
-                "epoch": epoch, "loss": avg_loss, **val_metrics
+                "epoch":    epoch,
+                "loss":     avg_loss,
+                "accuracy": val_metrics["accuracy"],
+                "f1":       val_metrics["f1"],
             })
 
             # Save the best checkpoint
@@ -543,7 +546,7 @@ class ClinicalClassifier:
         self._model.to(device)
         test_metrics = self._evaluate(test_loader, device)
 
-        from sklearn.metrics import classification_report
+        from sklearn.metrics import classification_report, confusion_matrix
         test_report = classification_report(
             test_metrics["labels"], test_metrics["preds"],
             target_names = self._labels,
@@ -551,25 +554,56 @@ class ClinicalClassifier:
             output_dict  = True,
             zero_division = 0,
         )
-        for lbl in self._labels:
-            m = test_report[lbl]
+        per_class = {
+            lbl: {
+                "precision": test_report[lbl]["precision"],
+                "recall":    test_report[lbl]["recall"],
+                "f1":        test_report[lbl]["f1-score"],
+                "support":   test_report[lbl]["support"],
+            }
+            for lbl in self._labels
+        }
+        for lbl, m in per_class.items():
             logger.info(
                 "  %-10s precision=%.3f  recall=%.3f  f1=%.3f  (n=%d)",
-                lbl, m["precision"], m["recall"], m["f1-score"], m["support"],
+                lbl, m["precision"], m["recall"], m["f1"], m["support"],
             )
 
+        cm = confusion_matrix(
+            test_metrics["labels"], test_metrics["preds"],
+            labels = list(range(len(self._labels))),
+        ).tolist()
+
         results = {
-            "val_accuracy":  best_val_acc,
-            "val_f1":        best_val_f1,
-            "test_accuracy": test_metrics["accuracy"],
-            "test_f1":       test_metrics["f1"],
-            "test_report":   test_report,
+            "val_accuracy":     best_val_acc,
+            "val_f1":           best_val_f1,
+            "test_accuracy":    test_metrics["accuracy"],
+            "test_f1":          test_metrics["f1"],
+            "per_class":        per_class,
+            "confusion_matrix": cm,
+            "history":          metrics_history,
         }
         logger.info(
             "Training complete — test_acc=%.4f  test_f1=%.4f",
             results["test_accuracy"], results["test_f1"],
         )
+
+        self._save_metrics(results)
         return results
+
+    def _save_metrics(self, results: dict) -> None:
+        """Persist training metrics to output_dir/training_metrics.json.
+
+        Read by the dashboard's Model Metrics page (via the API, not
+        directly -- the dashboard process never has this file locally).
+
+        Args:
+            results: The dict returned by train().
+        """
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+        metrics_path = self._output_dir / "training_metrics.json"
+        metrics_path.write_text(json.dumps(results, indent=2))
+        logger.info("Training metrics saved to %s", metrics_path)
 
     def _evaluate(self, data_loader, device) -> dict[str, float]:
         """Run inference on a DataLoader and return accuracy and F1.
