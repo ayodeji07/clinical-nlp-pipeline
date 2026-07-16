@@ -236,6 +236,13 @@ def _build_pyvis_html(pairs: list[dict]) -> str | None:
 
     net.set_options("""
     {
+      "nodes": {
+        "font": {
+          "size": 20,
+          "strokeWidth": 3,
+          "strokeColor": "#ffffff"
+        }
+      },
       "physics": {
         "forceAtlas2Based": {
           "gravitationalConstant": -60,
