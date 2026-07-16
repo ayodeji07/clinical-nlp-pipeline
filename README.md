@@ -31,6 +31,18 @@ from unstructured medical notes using state-of-the-art biomedical NLP models.
 
 ---
 
+## Screenshots
+
+| Live Demo | Entity Explorer |
+|---|---|
+| ![Live Demo — entity extraction, ICD-10 mapping, and severity classification on a real note](docs/images/live_demo.png) | ![Entity Explorer — frequency chart and co-occurrence network](docs/images/explorer.png) |
+
+| Model Metrics |
+|---|
+| ![Model Metrics — per-class precision/recall/F1 and confusion matrix](docs/images/model_metrics.png) |
+
+---
+
 ## Live demo
 
 🔗 [clinical-nlp-pipeline.streamlit.app](https://clinical-nlp-pipeline.streamlit.app) *(deploy your own — see VSCODE_GUIDE.md)*
