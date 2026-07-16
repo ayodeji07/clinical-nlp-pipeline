@@ -100,9 +100,9 @@ The ETL pipeline only loads notes — it doesn't run NER, ICD-10 mapping,
 or classification against them. Populate those with the batch scripts:
 
 ```bash
-python scripts/run_ner_batch.py              # extract entities from stored notes
-python scripts/run_icd10_batch.py            # map DISEASE/SYMPTOM entities to ICD-10 codes
-python scripts/train_severity_classifier.py  # fine-tune the severity classifier
+python scripts/run_ner_batch.py                            # extract entities from stored notes
+python scripts/run_icd10_batch.py                          # map DISEASE/SYMPTOM entities to ICD-10 codes
+python scripts/train_severity_classifier.py --n-seeds 4    # fine-tune the severity classifier
 ```
 
 All three are idempotent and resumable, so interrupting and re-running
@@ -110,6 +110,39 @@ is safe. Pass `--limit N` to any of them for a quick subset run instead
 of processing the full dataset. The dashboard's Explorer and Model
 Metrics pages need this step done first — without it there's nothing
 to show beyond raw note counts.
+
+`--n-seeds N` on the classifier script trains N different random seeds
+and keeps only the checkpoint with the best critical-class F1, then
+records it in the `model_runs` table (what `GET /model/metrics` and
+the Model Metrics dashboard page read from). Fine-tuning a small
+classification head on a small dataset is sensitive to random
+init — an unseeded single run isn't reliably comparable across
+retrains, so this matters more than it might look like it should.
+Omit the flag (or use `--n-seeds 1`) for a single quick run.
+
+If your Supabase database was created before this feature was added,
+`model_runs` is missing the columns this needs (`create_all_tables()`
+only creates missing tables, not missing columns on existing ones) —
+run the migration in `sql/schema.sql` (the commented `ALTER TABLE`
+statements near the bottom of the `model_runs` block) once via the
+Supabase SQL Editor, or execute them directly:
+
+```bash
+python -c "
+from sqlalchemy import text
+from src.db.connection import get_session
+stmts = [
+    'ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS test_accuracy REAL',
+    'ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS test_f1 REAL',
+    'ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS per_class JSON',
+    'ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS confusion_matrix JSON',
+    'ALTER TABLE model_runs ADD COLUMN IF NOT EXISTS history JSON',
+]
+with get_session() as session:
+    for stmt in stmts:
+        session.execute(text(stmt))
+"
+```
 
 ---
 

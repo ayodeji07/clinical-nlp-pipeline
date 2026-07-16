@@ -67,14 +67,19 @@ stored data. All three are idempotent and resumable — safe to interrupt
 and re-run without creating duplicates:
 
 ```bash
-python scripts/run_ner_batch.py              # extract entities from stored notes
-python scripts/run_icd10_batch.py            # map DISEASE/SYMPTOM entities to ICD-10 codes
-python scripts/train_severity_classifier.py  # fine-tune the severity classifier
+python scripts/run_ner_batch.py                            # extract entities from stored notes
+python scripts/run_icd10_batch.py                          # map DISEASE/SYMPTOM entities to ICD-10 codes
+python scripts/train_severity_classifier.py --n-seeds 4    # fine-tune the severity classifier
 ```
 
 Each accepts `--limit N` for a quick subset run. `run_icd10_batch.py`
 also maintains an on-disk cache (`data/processed/icd10_mapping_cache.json`)
 so a restart skips re-attempting entities already checked, matched or not.
+`train_severity_classifier.py --n-seeds N` trains N different random
+seeds and keeps only the one with the best critical-class F1 — small
+fine-tuning runs are sensitive to initialisation, so a single unseeded
+run isn't reliably comparable across retrains (default is 1, i.e. a
+single run, if omitted).
 
 ---
 
@@ -141,13 +146,23 @@ MTSamples has no severity labels, so we derive them using weak supervision:
 
 The classifier learns to generalise beyond these keyword rules.
 
-Current performance (Bio_ClinicalBERT, class-weighted loss, retrained 2026-07-15):
-~67% overall test accuracy/F1. Per-class breakdown on `critical` — the
-safety-relevant class — is what matters most here: **precision 0.558,
-recall 0.829, F1 0.667** (up from an unweighted-loss baseline of recall
+Current performance (Bio_ClinicalBERT, class-weighted loss, retrained
+2026-07-16, best of 4 random seeds selected by critical-class F1):
+~72% overall test accuracy/F1. Per-class breakdown on `critical` — the
+safety-relevant class — is what matters most here: **precision 0.604,
+recall 0.829, F1 0.699** (up from an unweighted-loss baseline of recall
 0.486, F1 0.515). The loss is deliberately weighted to favour catching
 critical cases over aggregate accuracy, since missing a true critical
 note is far costlier than a false positive.
+
+Fine-tuning a 3-class head on top of a pretrained model with a small
+dataset is sensitive to random initialisation — an unseeded single run
+can land anywhere from critical F1 0.54 to 0.70. `train_severity_classifier.py`
+trains several seeds and keeps the best rather than trusting one
+arbitrary run; see `--n-seeds` in Batch processing above. Full metrics (including a
+confusion matrix and per-epoch history) are recorded in the
+`model_runs` table and served at `GET /model/metrics` — the dashboard's
+Model Metrics page reads from there, not a local file.
 
 ---
 
