@@ -218,7 +218,12 @@ def _build_pyvis_html(pairs: list[dict]) -> str | None:
             node,
             label = node,
             size  = size,
-            title = f"{node}<br>connections: {graph.degree(node)}",
+            # vis-network deliberately disables HTML parsing in tooltips
+            # (XSS protection, since entity text comes straight from the
+            # database) -- "<br>" would render as literal text rather
+            # than a line break. "\n" is the documented plain-text way
+            # to get a real line break instead.
+            title = f"{node}\nconnections: {graph.degree(node)}",
         )
 
     for src, tgt, attrs in graph.edges(data=True):
