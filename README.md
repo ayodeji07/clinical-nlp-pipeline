@@ -14,7 +14,7 @@ pinned: false
 A production-grade pipeline that extracts structured clinical knowledge
 from unstructured medical notes using state-of-the-art biomedical NLP models.
 
-[![CI](https://github.com/<your-username>/clinical-nlp-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/clinical-nlp-pipeline/actions)
+[![CI](https://github.com/ayodeji07/clinical-nlp-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/ayodeji07/clinical-nlp-pipeline/actions)
 
 ---
 
@@ -31,28 +31,85 @@ from unstructured medical notes using state-of-the-art biomedical NLP models.
 
 ---
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph ETL["ETL (src/etl)"]
+        Extract[extract.py] --> Transform[transform.py] --> Load[load.py]
+    end
+
+    MTSamples[(MTSamples CSV)] --> Extract
+
+    Load --> DB[(PostgreSQL<br/>Supabase)]
+
+    subgraph NLP["NLP (src/nlp)"]
+        NER[ner.py<br/>scispaCy hybrid NER]
+        ICD[icd_mapper.py<br/>exact → fuzzy → embedding]
+        Classifier[classifier.py<br/>Bio_ClinicalBERT fine-tune]
+        Cooc[cooccurrence.py<br/>entity co-occurrence graph]
+    end
+
+    DB <--> NER
+    DB <--> ICD
+    DB <--> Classifier
+    DB <--> Cooc
+
+    subgraph API["FastAPI (src/api)"]
+        Routes["routes: notes, entities, icd, model"]
+    end
+
+    NLP <--> Routes
+    DB <--> Routes
+
+    subgraph Dashboard["Streamlit (dashboard/)"]
+        Demo[demo.py]
+        Explorer[explorer.py]
+        Metrics[model_metrics.py]
+    end
+
+    Routes -- HTTP --> Dashboard
+
+    Routes -.deployed on.-> HFSpace["Hugging Face Spaces<br/>(Docker)"]
+    Dashboard -.deployed on.-> StreamlitCloud["Streamlit Cloud"]
+    Classifier -.checkpoint hosted on.-> HFHub["Hugging Face Hub<br/>model repo"]
+```
+
+Batch scripts (`scripts/run_ner_batch.py`, `run_icd10_batch.py`,
+`train_severity_classifier.py`) populate the NLP layer against notes
+already sitting in the database — see [Batch processing](#batch-processing)
+below.
+
+---
+
 ## Screenshots
 
-| Live Demo | Entity Explorer |
+| Live Demo | Model Metrics |
 |---|---|
-| ![Live Demo — entity extraction, ICD-10 mapping, and severity classification on a real note](docs/images/live_demo.png) | ![Entity Explorer — frequency chart and co-occurrence network](docs/images/explorer.png) |
+| ![Live Demo — entity extraction, ICD-10 mapping, and severity classification on a real note](docs/images/live_demo.png) | ![Model Metrics — per-class precision/recall/F1 and confusion matrix](docs/images/model_metrics.png) |
 
-| Model Metrics |
-|---|
-| ![Model Metrics — per-class precision/recall/F1 and confusion matrix](docs/images/model_metrics.png) |
+**Co-occurrence network** — entities that appear together across the corpus, node size scaled by degree:
+
+![Co-occurrence network — entities that appear together across the corpus](docs/images/explorer_graph.png)
+
+**Entity frequency** — most common extracted entities across the dataset:
+
+![Entity frequency — most common extracted entities, filterable by type](docs/images/explorer_frequency.png)
 
 ---
 
 ## Live demo
 
-🔗 [clinical-nlp-pipeline.streamlit.app](https://clinical-nlp-pipeline.streamlit.app) *(deploy your own — see VSCODE_GUIDE.md)*
+🔗 [clinical-nlp-pipeline.streamlit.app](https://clinical-nlp-pipeline.streamlit.app)
+
+Want to deploy your own copy instead? See VSCODE_GUIDE.md.
 
 ---
 
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-username>/clinical-nlp-pipeline
+git clone https://github.com/ayodeji07/clinical-nlp-pipeline
 cd clinical-nlp-pipeline
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt

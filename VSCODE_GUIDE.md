@@ -19,7 +19,7 @@ Streamlit demo in one sitting.
 ## Phase 0 — Clone and virtual environment
 
 ```bash
-git clone https://github.com/<your-username>/clinical-nlp-pipeline.git
+git clone https://github.com/ayodeji07/clinical-nlp-pipeline.git
 cd clinical-nlp-pipeline
 
 python -m venv .venv
